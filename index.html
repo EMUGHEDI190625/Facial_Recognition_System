@@ -24,8 +24,13 @@
       padding: 8px;
       font-size: 16px;
     }
-    #status {
+    #faceStatus {
       margin-top: 10px;
+      font-weight: bold;
+      color: green; /* always green */
+    }
+    #sheetStatus {
+      margin-top: 5px;
       font-weight: bold;
     }
   </style>
@@ -36,13 +41,15 @@
   <input type="text" id="employeeId" placeholder="Enter Employee ID" required><br>
   <button id="startBtn" disabled>Start Camera</button>
 
-  <p id="status">Loading models...</p>
+  <p id="faceStatus">Loading models...</p>
+  <p id="sheetStatus"></p>
 
   <video id="video" width="320" height="240" autoplay muted></video>
   <canvas id="overlay" width="320" height="240"></canvas>
 
   <script>
-    const statusEl = document.getElementById("status");
+    const faceStatusEl = document.getElementById("faceStatus");
+    const sheetStatusEl = document.getElementById("sheetStatus");
     const startBtn = document.getElementById("startBtn");
     const video = document.getElementById("video");
     const canvas = document.getElementById("overlay");
@@ -51,36 +58,30 @@
     let labeledDescriptors = [];
     let faceMatcher;
 
-    // Prevent duplicate submissions per session
     let lastRecognized = null;
-
-    // Prevent multiple attendance per employee per day (per session)
     let recognizedToday = {}; // { employeeId: { YYYY-MM-DD: true } }
 
-    // Google Apps Script Web App URL
     const SHEET_URL = "https://script.google.com/macros/s/AKfycbzY0QiXZq23BrmqXMtkRnmptg59V11XrjQDNp9j0Lv9J1QrELWBAitSTClW8AmOK8yTQA/exec";
 
-    // Load face-api.js models
     async function loadModels() {
-      statusEl.textContent = "⏳ Loading models...";
+      faceStatusEl.textContent = "⏳ Loading models...";
       try {
         await Promise.all([
           faceapi.nets.tinyFaceDetector.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models/'),
           faceapi.nets.faceLandmark68Net.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models/'),
           faceapi.nets.faceRecognitionNet.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models/')
         ]);
-        statusEl.textContent = "✅ Models loaded. Enter Employee ID and start camera.";
+        faceStatusEl.textContent = "✅ Models loaded. Enter Employee ID and start camera.";
         startBtn.disabled = false;
       } catch(err) {
-        statusEl.textContent = "❌ Error loading models: " + err;
+        faceStatusEl.textContent = "❌ Error loading models: " + err;
         console.error(err);
       }
     }
 
-    // Load all authorized faces
     async function loadAuthorizedFaces() {
       labeledDescriptors = [];
-      const authorizedNames = ["John Doe", "Jane Smith", "Ikata Kenoye"]; // replace with your employees
+      const authorizedNames = ["John Doe", "Jane Smith", "Ikata Kenoye"];
       for (const name of authorizedNames) {
         try {
           const img = await faceapi.fetchImage(`./images/${name}.jpg`);
@@ -88,32 +89,21 @@
             .detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
             .withFaceLandmarks()
             .withFaceDescriptor();
-
           if (detection) {
             labeledDescriptors.push(
               new faceapi.LabeledFaceDescriptors(name, [detection.descriptor])
             );
             console.log(`✅ Loaded authorized face for ${name}`);
-          } else {
-            console.warn(`⚠️ No face detected in ${name}.jpg`);
-          }
+          } else console.warn(`⚠️ No face detected in ${name}.jpg`);
         } catch (err) {
           console.error(err);
         }
       }
-
       faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6);
     }
 
-    // Send captured image to Google Sheet with visual feedback
     async function sendToSheet(employeeId, imageData, status) {
-      const data = {
-        employeeId,
-        imageLink: imageData,
-        status,
-        timestamp: new Date().toLocaleString()
-      };
-
+      const data = { employeeId, imageLink: imageData, status, timestamp: new Date().toLocaleString() };
       try {
         const response = await fetch(SHEET_URL, {
           method: "POST",
@@ -121,91 +111,23 @@
           body: JSON.stringify(data)
         });
 
+        // ✅ Show submission feedback below face status
         if (response.ok) {
-          statusEl.style.color = "green";
-          statusEl.textContent = `✅ ${status} for ${employeeId} sent successfully at ${new Date().toLocaleTimeString()}`;
+          sheetStatusEl.style.color = "green";
+          sheetStatusEl.textContent = `✅ ${status} for ${employeeId} sent successfully at ${new Date().toLocaleTimeString()}`;
         } else {
-          statusEl.style.color = "red";
-          statusEl.textContent = `❌ Failed to send data for ${employeeId} — ${response.statusText}`;
+          sheetStatusEl.style.color = "red";
+          sheetStatusEl.textContent = `❌ Failed to send data for ${employeeId} — ${response.statusText}`;
         }
 
         console.log("✅ Data sent to Google Sheet:", data);
       } catch(err) {
-        statusEl.style.color = "red";
-        statusEl.textContent = `❌ Error sending data: ${err.message}`;
+        sheetStatusEl.style.color = "red";
+        sheetStatusEl.textContent = `❌ Error sending data: ${err.message}`;
         console.error("❌ Error sending to Google Sheet:", err);
       }
     }
 
-    // Start webcam & recognition
     startBtn.onclick = async () => {
       const employeeId = document.getElementById("employeeId").value.trim();
-      if (!employeeId) {
-        alert("Please enter Employee ID.");
-        return;
-      }
-
-      await loadAuthorizedFaces();
-
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        video.srcObject = stream;
-        await video.play();
-        statusEl.style.color = "black";
-        statusEl.textContent = "🎥 Camera started — detecting faces...";
-
-        setInterval(async () => {
-          const detections = await faceapi
-            .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
-            .withFaceLandmarks()
-            .withFaceDescriptors();
-
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          faceapi.matchDimensions(canvas, { width: video.width, height: video.height });
-          const resized = faceapi.resizeResults(detections, { width: video.width, height: video.height });
-
-          const results = resized.map(d => faceMatcher.findBestMatch(d.descriptor));
-          const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-
-          for (let i = 0; i < results.length; i++) {
-            const result = results[i];
-            const box = resized[i].detection.box;
-
-            // Refine recognition label
-            const statusText = result.label === "unknown" ? "Unauthorized" : `Authorized: ${result.label}`;
-            const timeNow = new Date().toLocaleTimeString();
-
-            // Draw box & timestamp directly on canvas
-            const drawBox = new faceapi.draw.DrawBox(box, { label: `${statusText} | ${timeNow}` });
-            drawBox.draw(canvas);
-
-            // Update status below video
-            statusEl.textContent = `Face detected: ${statusText} | ${timeNow}`;
-
-            // Prevent duplicate submission for same employee today
-            if (!recognizedToday[employeeId]) recognizedToday[employeeId] = {};
-            if (!recognizedToday[employeeId][today]) {
-              recognizedToday[employeeId][today] = true;
-
-              // Capture frame
-              const captureCanvas = document.createElement("canvas");
-              captureCanvas.width = video.videoWidth;
-              captureCanvas.height = video.videoHeight;
-              captureCanvas.getContext("2d").drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
-              const imageDataURL = captureCanvas.toDataURL("image/jpeg");
-
-              await sendToSheet(employeeId, imageDataURL, statusText);
-            }
-          }
-        }, 1500); // every 1.5 sec
-      } catch(err) {
-        statusEl.style.color = "red";
-        statusEl.textContent = "⚠️ Camera error: " + err.message;
-        console.error(err);
-      }
-    };
-
-    window.addEventListener("load", loadModels);
-  </script>
-</body>
-</html>
+      if (!employeeId) re
