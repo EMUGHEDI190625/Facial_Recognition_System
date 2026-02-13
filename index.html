@@ -51,13 +51,16 @@
     let labeledDescriptors = [];
     let faceMatcher;
 
-    // ✅ Prevent duplicate submissions
+    // Prevent duplicate submissions per session
     let lastRecognized = null;
+
+    // Prevent multiple attendance per day
+    let recognizedToday = {}; // { employeeId: { YYYY-MM-DD: true } }
 
     // Your Google Apps Script Web App URL
     const SHEET_URL = "https://script.google.com/macros/s/AKfycbzY0QiXZq23BrmqXMtkRnmptg59V11XrjQDNp9j0Lv9J1QrELWBAitSTClW8AmOK8yTQA/exec";
 
-    // Load face-api.js models from CDN
+    // Load face-api.js models
     async function loadModels() {
       statusEl.textContent = "⏳ Loading models...";
       try {
@@ -74,10 +77,10 @@
       }
     }
 
-    // Load all authorized faces from /images folder
+    // Load all authorized faces
     async function loadAuthorizedFaces() {
       labeledDescriptors = [];
-      const authorizedNames = ["John Doe", "Jane Smith", "Ikata Kenoye"]; // replace with your employees
+      const authorizedNames = ["John Doe", "Jane Smith", "Ikata Kenoye"]; // your employees
       for (const name of authorizedNames) {
         try {
           const img = await faceapi.fetchImage(`./images/${name}.jpg`);
@@ -102,7 +105,7 @@
       faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6);
     }
 
-    // Send captured image to Google Sheet
+    // Send captured image to Google Sheet with visual confirmation
     async function sendToSheet(employeeId, imageData, status) {
       const data = {
         employeeId,
@@ -112,18 +115,29 @@
       };
 
       try {
-        await fetch(SHEET_URL, {
+        const response = await fetch(SHEET_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(data)
         });
+
+        if (response.ok) {
+          statusEl.style.color = "green";
+          statusEl.textContent = `✅ ${status} for ${employeeId} sent successfully at ${new Date().toLocaleTimeString()}`;
+        } else {
+          statusEl.style.color = "red";
+          statusEl.textContent = `❌ Failed to send data for ${employeeId} — ${response.statusText}`;
+        }
+
         console.log("✅ Data sent to Google Sheet:", data);
       } catch(err) {
+        statusEl.style.color = "red";
+        statusEl.textContent = `❌ Error sending data: ${err.message}`;
         console.error("❌ Error sending to Google Sheet:", err);
       }
     }
 
-    // Start webcam and recognition
+    // Start webcam & recognition
     startBtn.onclick = async () => {
       const employeeId = document.getElementById("employeeId").value.trim();
       if (!employeeId) {
@@ -137,6 +151,7 @@
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         video.srcObject = stream;
         await video.play();
+        statusEl.style.color = "black";
         statusEl.textContent = "🎥 Camera started — detecting faces...";
 
         setInterval(async () => {
@@ -150,15 +165,18 @@
           const resized = faceapi.resizeResults(detections, { width: video.width, height: video.height });
 
           const results = resized.map(d => faceMatcher.findBestMatch(d.descriptor));
+          const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
 
           for (let i = 0; i < results.length; i++) {
             const result = results[i];
             const box = resized[i].detection.box;
 
-            // ✅ Refine recognition label
+            // Refine recognition label
             const statusText = result.label === "unknown" ? "Unauthorized" : `Authorized: ${result.label}`;
 
-            const drawBox = new faceapi.draw.DrawBox(box, { label: statusText });
+            // Draw box & timestamp on canvas
+            const timeNow = new Date().toLocaleTimeString();
+            const drawBox = new faceapi.draw.DrawBox(box, { label: `${statusText} | ${timeNow}` });
             drawBox.draw(canvas);
 
             // Capture frame
@@ -168,16 +186,21 @@
             captureCanvas.getContext("2d").drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
             const imageDataURL = captureCanvas.toDataURL("image/jpeg");
 
-            statusEl.textContent = `Face detected: ${statusText}`;
-
-            // ✅ Prevent duplicate submissions
+            // Prevent duplicate submission
             if (lastRecognized !== statusText) {
               lastRecognized = statusText;
-              await sendToSheet(employeeId, imageDataURL, statusText);
+
+              // Check daily attendance
+              if (!recognizedToday[employeeId]) recognizedToday[employeeId] = {};
+              if (!recognizedToday[employeeId][today]) {
+                recognizedToday[employeeId][today] = true;
+                await sendToSheet(employeeId, imageDataURL, statusText);
+              }
             }
           }
         }, 1500); // every 1.5 sec
       } catch(err) {
+        statusEl.style.color = "red";
         statusEl.textContent = "⚠️ Camera error: " + err.message;
         console.error(err);
       }
@@ -187,4 +210,3 @@
   </script>
 </body>
 </html>
-
