@@ -299,3 +299,77 @@
 
       try {
         await fetch(SHEET_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data)
+        });
+        console.log("✅ Data sent to Google Sheet:", data);
+      } catch(err) {
+        console.error("❌ Error sending to Google Sheet:", err);
+      }
+    }
+
+    // Start webcam and recognition
+    startBtn.onclick = async () => {
+      const employeeId = document.getElementById("employeeId").value.trim();
+      if (!employeeId) {
+        alert("Please enter Employee ID.");
+        return;
+      }
+
+      await loadAuthorizedFaces();
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+        await video.play();
+        statusEl.textContent = "🎥 Camera started — detecting faces...";
+
+        setInterval(async () => {
+          const detections = await faceapi
+            .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+            .withFaceLandmarks()
+            .withFaceDescriptors();
+
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          faceapi.matchDimensions(canvas, { width: video.width, height: video.height });
+          const resized = faceapi.resizeResults(detections, { width: video.width, height: video.height });
+
+          const results = resized.map(d => faceMatcher.findBestMatch(d.descriptor));
+
+          for (let i = 0; i < results.length; i++) {
+            const result = results[i];
+            const box = resized[i].detection.box;
+
+            // ✅ Refine recognition label
+            const statusText = result.label === "unknown" ? "Unauthorized" : `Authorized: ${result.label}`;
+
+            const drawBox = new faceapi.draw.DrawBox(box, { label: statusText });
+            drawBox.draw(canvas);
+
+            // Capture frame
+            const captureCanvas = document.createElement("canvas");
+            captureCanvas.width = video.videoWidth;
+            captureCanvas.height = video.videoHeight;
+            captureCanvas.getContext("2d").drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+            const imageDataURL = captureCanvas.toDataURL("image/jpeg");
+
+            statusEl.textContent = `Face detected: ${statusText}`;
+
+            // ✅ Prevent duplicate submissions
+            if (lastRecognized !== statusText) {
+              lastRecognized = statusText;
+              await sendToSheet(employeeId, imageDataURL, statusText);
+            }
+          }
+        }, 1500); // every 1.5 sec
+      } catch(err) {
+        statusEl.textContent = "⚠️ Camera error: " + err.message;
+        console.error(err);
+      }
+    };
+
+    window.addEventListener("load", loadModels);
+  </script>
+</body>
+</html>
