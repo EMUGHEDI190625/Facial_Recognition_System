@@ -51,7 +51,7 @@
 
     // ✅ Function to send recognition data to Google Sheet
     async function sendToSheet(employeeId, fullName, imageLink) {
-      const SHEET_URL = "https://script.google.com/macros/s/AKfycbwg8S9MsAasSRsi-f_pH5wG-xVZylniONqshznzKCc2B2g33DkSCPmC31Yonmzoh8c/exec"; // 🔗 Replace with your Apps Script Web App URL
+      const SHEET_URL = "https://script.google.com/macros/s/AKfycbzY0QiXZq23BrmqXMtkRnmptg59V11XrjQDNp9j0Lv9J1QrELWBAitSTClW8AmOK8yTQA/exec"; // 🔗 Replace with your Apps Script Web App URL
 
       const data = {
         employeeId,
@@ -190,7 +190,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ECN Face Recognition System</title>
 
-  <!-- Load face-api.js from CDN -->
+  <!-- Load face-api.js -->
   <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 
   <style>
@@ -220,7 +220,6 @@
   <h2>ECN Face Recognition System</h2>
 
   <input type="text" id="employeeId" placeholder="Enter Employee ID" required><br>
-  <input type="text" id="fullName" placeholder="Enter Full Name" required><br>
   <button id="startBtn" disabled>Start Camera</button>
 
   <p id="status">Loading models...</p>
@@ -238,10 +237,10 @@
     let labeledDescriptors = [];
     let faceMatcher;
 
-    // ✅ Replace with your Google Apps Script Web App URL
-    const SHEET_URL = "https://script.google.com/macros/s/AKfycbzY0QiXZq23BrmqXMtkRnmptg59V11XrjQDNp9j0Lv9J1QrELWBAitSTClW8AmOK8yTQA/exec";
+    // Your Google Apps Script Web App URL
+    const SHEET_URL = "YOUR_DEPLOYED_WEBAPP_URL_HERE";
 
-    // ✅ Load models from CDN
+    // Load face-api.js models from CDN
     async function loadModels() {
       statusEl.textContent = "⏳ Loading models...";
       try {
@@ -250,7 +249,7 @@
           faceapi.nets.faceLandmark68Net.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models/'),
           faceapi.nets.faceRecognitionNet.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models/')
         ]);
-        statusEl.textContent = "✅ Models loaded. Enter details and start camera.";
+        statusEl.textContent = "✅ Models loaded. Enter Employee ID and start camera.";
         startBtn.disabled = false;
       } catch(err) {
         statusEl.textContent = "❌ Error loading models: " + err;
@@ -258,36 +257,38 @@
       }
     }
 
-    // ✅ Load pre-stored authorized face images
-    async function loadLabeledImage(fullName) {
+    // Load all authorized faces from /images folder
+    async function loadAuthorizedFaces() {
       labeledDescriptors = [];
-      try {
-        const imgUrl = `./images/${fullName}.jpg`; // your pre-stored images folder
-        const img = await faceapi.fetchImage(imgUrl);
-        const detection = await faceapi
-          .detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
-          .withFaceLandmarks()
-          .withFaceDescriptor();
+      const authorizedNames = ["John Doe", "Jane Smith", "Ikata Kenoye"]; // replace with your employees
+      for (const name of authorizedNames) {
+        try {
+          const img = await faceapi.fetchImage(`./images/${name}.jpg`);
+          const detection = await faceapi
+            .detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
+            .withFaceLandmarks()
+            .withFaceDescriptor();
 
-        if(detection) {
-          labeledDescriptors.push(
-            new faceapi.LabeledFaceDescriptors(fullName, [detection.descriptor])
-          );
-          console.log(`✅ Loaded authorized face for ${fullName}`);
-        } else {
-          console.warn(`⚠️ No face detected in ${fullName}.jpg`);
+          if (detection) {
+            labeledDescriptors.push(
+              new faceapi.LabeledFaceDescriptors(name, [detection.descriptor])
+            );
+            console.log(`✅ Loaded authorized face for ${name}`);
+          } else {
+            console.warn(`⚠️ No face detected in ${name}.jpg`);
+          }
+        } catch (err) {
+          console.error(err);
         }
-      } catch(err) {
-        console.error(err);
-        alert(`❌ Could not load image for "${fullName}". Make sure it exists in /images folder.`);
       }
+
+      faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6);
     }
 
-    // ✅ Send captured image and info to Google Sheet
-    async function sendToSheet(employeeId, fullName, imageData, status) {
+    // Send captured image to Google Sheet
+    async function sendToSheet(employeeId, imageData, status) {
       const data = {
         employeeId,
-        fullName,
         imageLink: imageData,
         status,
         timestamp: new Date().toLocaleString()
@@ -305,23 +306,15 @@
       }
     }
 
-    // ✅ Start camera and recognition
+    // Start webcam and recognition
     startBtn.onclick = async () => {
-      const fullName = document.getElementById("fullName").value.trim();
       const employeeId = document.getElementById("employeeId").value.trim();
-
-      if(!fullName || !employeeId) {
-        alert("Please enter Employee ID and Full Name.");
+      if (!employeeId) {
+        alert("Please enter Employee ID.");
         return;
       }
 
-      await loadLabeledImage(fullName);
-      if(!labeledDescriptors || labeledDescriptors.length === 0) {
-        alert("No authorized face loaded. Check image name/path.");
-        return;
-      }
-
-      faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6);
+      await loadAuthorizedFaces();
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -341,10 +334,10 @@
 
           const results = resized.map(d => faceMatcher.findBestMatch(d.descriptor));
 
-          for(let i = 0; i < results.length; i++) {
+          for (let i = 0; i < results.length; i++) {
             const result = results[i];
             const box = resized[i].detection.box;
-            const drawBox = new faceapi.draw.DrawBox(box, { label: result.toString() });
+            const drawBox = new faceapi.draw.DrawBox(box, { label: result.label === "unknown" ? "Unauthorized" : "Authorized" });
             drawBox.draw(canvas);
 
             // Capture frame
@@ -358,9 +351,9 @@
             statusEl.textContent = `Face detected: ${statusText}`;
 
             // Send to Google Sheet
-            await sendToSheet(employeeId, fullName, imageDataURL, statusText);
+            await sendToSheet(employeeId, imageDataURL, statusText);
           }
-        }, 1500); // check every 1.5 seconds
+        }, 1500); // every 1.5 sec
       } catch(err) {
         statusEl.textContent = "⚠️ Camera error: " + err.message;
         console.error(err);
@@ -371,4 +364,3 @@
   </script>
 </body>
 </html>
-
