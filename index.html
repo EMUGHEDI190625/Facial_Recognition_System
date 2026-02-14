@@ -84,7 +84,8 @@
       const authorizedNames = ["John Doe", "Jane Smith", "Ikata Kenoye"];
       for (const name of authorizedNames) {
         try {
-          const img = await faceapi.fetchImage(`./images/${name}.jpg`);
+          const img = await faceapi.fetchImage(`https://raw.githubusercontent.com/EMUGHEDI190625/face-models/main/images/${name}.jpg`);
+          
           const detection = await faceapi
             .detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
             .withFaceLandmarks()
@@ -104,28 +105,29 @@
 
     async function sendAttendanceToScript(employeeId, status, imageDataURL){
 
-      const url = "https://script.google.com/macros/s/AKfycbxCz2kWeP73Xn7OXs-IJTQeCjo20l1pu21kkQXFTZHeNuVnm0puhQ1hnTe9gmb3tipLZw/exec";
-      
-      const formData = new FormData();
-      formData.append("employeeId", employeeId);
-      formData.append("status", status);
-      formData.append("image", imageDataURL);
+      const url="YOUR_WEBAPP_URL";
       
       try{
-        const res = await fetch(url,{
-          method:"POST",
-          body:formData
-        });
       
-        const text = await res.text();
-        console.log(text);
+      const res=await fetch(url,{
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body:JSON.stringify({
+      employeeId,
+      status,
+      image:imageDataURL
+      })
+      });
       
-        sheetStatusEl.style.color="green";
-        sheetStatusEl.textContent="✅ Attendance sent";
+      const text=await res.text();
+      console.log(text);
+      
+      sheetStatusEl.style.color="green";
+      sheetStatusEl.textContent="✅ Attendance sent";
       
       }catch(err){
-        sheetStatusEl.style.color="red";
-        sheetStatusEl.textContent="❌ Network Error: "+err.message;
+      sheetStatusEl.style.color="red";
+      sheetStatusEl.textContent="❌ Network Error: "+err.message;
       }
       }
 
@@ -194,20 +196,3 @@
   </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
